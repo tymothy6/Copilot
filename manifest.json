@@ -1,0 +1,18 @@
+{
+  "name": "Copilot",
+  "id": "1283872076476557239",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "editorType": [
+    "figjam"
+  ],
+  "containsWidget": true,
+  "widgetApi": "1.0.0",
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ]
+  }
+}
