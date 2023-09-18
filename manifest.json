@@ -10,6 +10,7 @@
   ],
   "containsWidget": true,
   "widgetApi": "1.0.0",
+  "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
       "none"

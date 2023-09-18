@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copilot</title>
+</head>
+<body>
+    <script>
+      window.onmessage = async (event) => {
+        console.log("Message received in iframe:", event.data);
+        const { type, text } = event.data;
+
+        if (type === 'makeApiCall') {
+        try {
+          const response = await fetch('https://vercel-cmgxk7hlq-tymothy6.vercel.app/api/openai', {
+            method: 'POST',
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+            messages: [
+              { role: "system", content: "You are a helpful assistant." },
+              { role: "user", content: text }
+            ],
+            model: "gpt-3.5-turbo",
+            })
+          });
+
+          console.log("API response status:", response.status);
+
+          if (!response.ok) {
+            console.error("Error fetching: ", await response.text());
+            return;
+          }
+
+          const data = await response.json();
+          window.parent.postMessage({ type: 'apiResponse', data }, '*');
+        } catch (error) {
+          console.error("Error making API call:", error);
+          }
+        }
+      }
+    </script>
+</body>
+</html>
