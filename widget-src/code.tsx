@@ -7,63 +7,64 @@ figma.showUI(__html__, { width: 70, height: 0 });
 function Copilot() {
   const widgetId = useWidgetNodeId();
 
-  const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null);
-  
+  const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null); // useSyncedState expects a key and a default value
+  const [accumulatedStickyTexts, setAccumulatedStickyTexts] = useSyncedState<string[]>("accumulatedStickyTexts", []);
+
   useEffect(() => {
     let resolvePromise: (() => void) | undefined;
-    // Listen for selection changes, iterating through the page children to check for connectors between the widget and a sticky
-    const selectionChangeListener = () => {
-      const selectedNodes = figma.currentPage.selection;
-      console.log('Selection:', selectedNodes); // 0. Check that the selection is found 
-      console.log('Page children:', figma.currentPage.children); // 0. Check that the page children are found 
+    // Listen for document changes of the CreateChange type
+    const documentChangeListener = (event: any) => {
+      const newStickyTexts: string[] = []; // initialize an array to store the sticky texts
 
-      for (const node of selectedNodes) {
-        if (node.type !== 'STICKY') continue;
-          console.log('Sticky selected:', node); // 1. Check that the sticky is selected 
-          console.log('Selection id:', node.id); // testing
+      for (const change of event.documentChanges) {
+        // Check for CreateChange type (newly created connectors)
+        if (change.type === "CREATE" && change.node.type === "CONNECTOR") {
+          console.log('New connector created:', change.node); // check that the connector is created
 
-          for (const child of figma.currentPage.children) {
-            if (child.type !== 'CONNECTOR') continue;
-            console.log('Searching for connectors'); // 1. Check that the search for connectors is triggered 
-            const connector = child as ConnectorNode;
+          const connector = change.node as ConnectorNode;
 
-            let startNode: StickyNode | undefined;
-            let endNode: WidgetNode | undefined;
+          let startNode: StickyNode | undefined;
+          let endNode: WidgetNode | undefined;
 
-            if ('endpointNodeId' in connector.connectorStart) {
-              startNode = figma.getNodeById(connector.connectorStart.endpointNodeId) as StickyNode;
-            }
+          if ('endpointNodeId' in connector.connectorStart) {
+            startNode = figma.getNodeById(connector.connectorStart.endpointNodeId) as StickyNode;
+          }
 
-            if ('endpointNodeId' in connector.connectorEnd) {
-              endNode = figma.getNodeById(connector.connectorEnd.endpointNodeId) as WidgetNode;
-            }
-            
-            console.log('startNode:', startNode); // testing
-            console.log('endNode:', endNode); // testing
-            
-            if(!startNode || !endNode) continue;
+          if ('endpointNodeId' in connector.connectorEnd) {
+            endNode = figma.getNodeById(connector.connectorEnd.endpointNodeId) as WidgetNode;
+          }
 
-            const isStickyConnectedToWidget = (startNode.id === node.id && endNode.id === widgetId) ||
-                                            (endNode.id === node.id && startNode.id === widgetId);
+          console.log('startNode:', startNode); // check that the start node is a sticky note
+          console.log('endNode:', endNode); // check that the end node is a widget
 
-            if (isStickyConnectedToWidget) {
-              const stickyText = startNode.text.characters; 
-              console.log('stickyText:', stickyText); // 2. Check that the sticky text is found
-              setPendingApiCall(stickyText);
-              console.log('pendingApiCall:', pendingApiCall); // 3. Check that the synced state is set
-              break;
-            }
+          if (!startNode || !endNode) continue;
+
+          const isStickyConnectedToWidget = (startNode.type === "STICKY" && endNode.id === widgetId); 
+          // check that the connector is drawn from the sticky to the widget (not the other way around)
+
+          if (isStickyConnectedToWidget) {
+            newStickyTexts.push(startNode.text.characters); // add the sticky text to the array
           }
         }
-      };
+      }
+
+      if (newStickyTexts.length > 0) {
+        const newAccumulatedTexts = [...accumulatedStickyTexts, ...newStickyTexts];
+        setAccumulatedStickyTexts(newAccumulatedTexts); // update the accumulated sticky texts
+        console.log('New accumulated texts:', newAccumulatedTexts);
+        const aggregatedText = newAccumulatedTexts.join('\n');
+        console.log('Aggregated text:', aggregatedText);
+        setPendingApiCall(aggregatedText); // update the pending API call
+      }
+    };
 
     waitForTask(new Promise<void>(resolve => {
       resolvePromise = resolve;
-      figma.on('selectionchange', selectionChangeListener);
+      figma.on('documentchange', documentChangeListener);
     }));
 
     return () => {
-      figma.off('selectionchange', selectionChangeListener);
+      figma.off('documentchange', documentChangeListener);
     };
   })
 
