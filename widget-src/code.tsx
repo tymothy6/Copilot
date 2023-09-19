@@ -1,7 +1,7 @@
 const { widget } = figma
 const { AutoLayout, Text, useEffect, useWidgetNodeId, useSyncedState, waitForTask } = widget
 
-// Initialize the hidden UI used to make API calls outside of the widget code
+// Initialize the iframe used to make API calls outside of the widget code
 figma.showUI(__html__, { width: 70, height: 0 });
 
 function Copilot() {
@@ -11,21 +11,51 @@ function Copilot() {
   
   useEffect(() => {
     let resolvePromise: (() => void) | undefined;
-    // Listen for selection changes
+    // Listen for selection changes, iterating through the page children to check for connectors between the widget and a sticky
     const selectionChangeListener = () => {
       const selectedNodes = figma.currentPage.selection;
-      console.log('Selection:', selectedNodes);
+      console.log('Selection:', selectedNodes); // 0. Check that the selection is found 
+      console.log('Page children:', figma.currentPage.children); // 0. Check that the page children are found 
 
-      if (selectedNodes.length === 1 && selectedNodes[0].type === 'STICKY') {
-        const sticky = selectedNodes[0] as StickyNode;
-        if (sticky.text && sticky.text.characters.length > 0) {
-          setPendingApiCall(sticky.text.characters);
-          resolvePromise?.();
+      for (const node of selectedNodes) {
+        if (node.type !== 'STICKY') continue;
+          console.log('Sticky selected:', node); // 1. Check that the sticky is selected 
+          console.log('Selection id:', node.id); // testing
+
+          for (const child of figma.currentPage.children) {
+            if (child.type !== 'CONNECTOR') continue;
+            console.log('Searching for connectors'); // 1. Check that the search for connectors is triggered 
+            const connector = child as ConnectorNode;
+
+            let startNode: StickyNode | undefined;
+            let endNode: WidgetNode | undefined;
+
+            if ('endpointNodeId' in connector.connectorStart) {
+              startNode = figma.getNodeById(connector.connectorStart.endpointNodeId) as StickyNode;
+            }
+
+            if ('endpointNodeId' in connector.connectorEnd) {
+              endNode = figma.getNodeById(connector.connectorEnd.endpointNodeId) as WidgetNode;
+            }
+            
+            console.log('startNode:', startNode); // testing
+            console.log('endNode:', endNode); // testing
+            
+            if(!startNode || !endNode) continue;
+
+            const isStickyConnectedToWidget = (startNode.id === node.id && endNode.id === widgetId) ||
+                                            (endNode.id === node.id && startNode.id === widgetId);
+
+            if (isStickyConnectedToWidget) {
+              const stickyText = startNode.text.characters; 
+              console.log('stickyText:', stickyText); // 2. Check that the sticky text is found
+              setPendingApiCall(stickyText);
+              console.log('pendingApiCall:', pendingApiCall); // 3. Check that the synced state is set
+              break;
+            }
+          }
         }
-      } else {
-        console.log('Select a sticky note with text to start');
-      }
-    };
+      };
 
     waitForTask(new Promise<void>(resolve => {
       resolvePromise = resolve;
@@ -39,10 +69,9 @@ function Copilot() {
 
   const handleJamClick = () => { 
     console.log("handleJamClick triggered"); // check that the function is triggered
-    console.log("pendingApiCall:", pendingApiCall); // check that the synced state is set
 
     if(pendingApiCall) {
-      console.log("Posting message with text:", pendingApiCall); // check the contents of the message
+      console.log("Posting message:", pendingApiCall); // check the contents of the message
 
       // Start the async task
       const apiCallTask = new Promise<void>((resolve, reject) => {
