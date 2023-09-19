@@ -9,42 +9,33 @@ function Copilot() {
 
   const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null);
   
-  // Logic to handle when user draws a connector between a sticky and the widget
   useEffect(() => {
-    console.log("Binding handleSelectionChange to selectionchange event"); // check that the function is bound to the event when the widget is loaded
-
-    function handleSelectionChange() {
-      console.log("handleSelectionChange triggered"); // check that the function is triggered
-
+    let resolvePromise: (() => void) | undefined;
+    // Listen for selection changes
+    const selectionChangeListener = () => {
       const selectedNodes = figma.currentPage.selection;
-      console.log(selectedNodes); // see the selected nodes
+      console.log('Selection:', selectedNodes);
 
-      if (selectedNodes.length === 1 && selectedNodes[0].type === 'CONNECTOR') {
-        const connector = selectedNodes[0] as ConnectorNode;
-
-        let startNode: StickyNode | undefined;
-        let endNode: WidgetNode | undefined;
-        
-        if (connector.connectorStart && 'node' in connector.connectorStart) {
-          startNode = connector.connectorStart.node as StickyNode;
+      if (selectedNodes.length === 1 && selectedNodes[0].type === 'STICKY') {
+        const sticky = selectedNodes[0] as StickyNode;
+        if (sticky.text && sticky.text.characters.length > 0) {
+          setPendingApiCall(sticky.text.characters);
+          resolvePromise?.();
         }
-        
-        if (connector.connectorEnd && 'node' in connector.connectorEnd) {
-          endNode = connector.connectorEnd.node as WidgetNode;
-        }
-        
-        if (startNode?.type === 'STICKY' && endNode?.id === widgetId) {
-            setPendingApiCall(startNode.text.characters);
-          }
-        }
+      } else {
+        console.log('Select a sticky note with text to start');
       }
+    };
 
-    figma.on('selectionchange', handleSelectionChange);
+    waitForTask(new Promise<void>(resolve => {
+      resolvePromise = resolve;
+      figma.on('selectionchange', selectionChangeListener);
+    }));
 
     return () => {
-      figma.off('selectionchange', handleSelectionChange);
+      figma.off('selectionchange', selectionChangeListener);
     };
-  });
+  })
 
   const handleJamClick = () => { 
     console.log("handleJamClick triggered"); // check that the function is triggered
@@ -93,7 +84,7 @@ function Copilot() {
         setPendingApiCall(null); // Reset the pending API call
       });
     }
-  };
+  }
 
   return (
     <AutoLayout 
