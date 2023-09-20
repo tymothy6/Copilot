@@ -13,7 +13,7 @@
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "none"
+      "https://vercel-tymothy6.vercel.app/api/openai"
     ]
   }
 }

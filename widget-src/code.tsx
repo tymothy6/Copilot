@@ -2,7 +2,7 @@ const { widget } = figma
 const { AutoLayout, Text, useEffect, useWidgetNodeId, useSyncedState, waitForTask } = widget
 
 // Initialize the iframe used to make API calls outside of the widget code
-figma.showUI(__html__, { width: 70, height: 0 });
+// figma.showUI(__html__, { width: 70, height: 0 });
 // Listen for console logs from the iframe
 figma.ui.onmessage = (event) => {
   if (event.pluginMessage && event.pluginMessage.type === 'iframeLog') {
@@ -15,6 +15,7 @@ function Copilot() {
 
   const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null); // useSyncedState expects a key and a default value
   const [accumulatedStickyTexts, setAccumulatedStickyTexts] = useSyncedState<string[]>("accumulatedStickyTexts", []);
+  const [stickyFill, setStickyFill] = useSyncedState<ReadonlyArray<Paint> | null>("stickyFill", null);
 
   useEffect(() => {
     let resolvePromise: (() => void) | undefined;
@@ -50,6 +51,12 @@ function Copilot() {
 
           if (isStickyConnectedToWidget) {
             newStickyTexts.push(startNode.text.characters); // add the sticky text to the array
+
+            if (Array.isArray(startNode.fills)) {
+              setStickyFill(startNode.fills); // update the sticky fill
+            } else {
+              setStickyFill(null);
+            }
           }
         }
       }
@@ -74,54 +81,85 @@ function Copilot() {
     };
   })
 
-  const handleJamClick = () => { 
-    console.log("handleJamClick triggered"); // check that the function is triggered
+  async function handleApiResponse(data: any) {
+    if (data && data.choices && data.choices.length > 0 && data.choices[0].message) {
+      const completionText = data.choices[0].message.content.trim();
 
-    if(pendingApiCall) {
-      console.log("Posting message:", pendingApiCall);
+      // Create a new sticky note using the widget position as reference
+      const newSticky = figma.createSticky();
+      if (stickyFill !== null) {
+        newSticky.fills = stickyFill;
+      }
 
-      figma.ui.postMessage({ pluginMessage: { type: 'makeApiCall', text: pendingApiCall } });
-      setPendingApiCall(null); // Reset the pending API call
+      // Load the font before setting characters
+      const defaultFont: FontName = { family: "Inter", style: "Regular" };
+      await figma.loadFontAsync(defaultFont);
+      newSticky.text.fontName = defaultFont;
+     
+      newSticky.text.characters = completionText || '';
+
+      const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
+
+      if (widgetNode) {
+        newSticky.x = widgetNode.x + widgetNode.width + 100;
+        newSticky.y = widgetNode.y + (widgetNode.height / 2) - (newSticky.height / 2);
+      }
+
+      // Create a connector between the widget and the new sticky
+      const connector = figma.createConnector();
+      connector.connectorStart = {
+        endpointNodeId: widgetId,
+        magnet: 'AUTO'
+      };
+      connector.connectorEnd = {
+        endpointNodeId: newSticky.id,
+        magnet: 'AUTO'
+      };
+
+    } else {
+      console.error("Error handling API response:", data);
     }
   }
 
-  useEffect(() => {
-    const handleApiResponse = (event: any) => {
-      console.log("Received message:", event);
-      console.log("handleApiResponse triggered with data:", event.pluginMessage);
+  const handleJamClick = async () => { 
+    console.log("handleJamClick triggered"); 
 
-      if (event.pluginMessage && event.pluginMessage.type === 'apiResponse') {
-        const completionText = event.pluginMessage.data.choices[0].message.content;
-            // Create a new sticky note using the widget position as reference
-            const newSticky = figma.createSticky();
-            newSticky.text.characters = completionText || '';
-    
-            const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
-    
-            if (widgetNode) {
-              newSticky.x = widgetNode.x + widgetNode.width + 100;
-              newSticky.y = widgetNode.y;
-            }
-    
-            // Create a connector between the widget and the new sticky
-            const connector = figma.createConnector();
-            connector.connectorStart = {
-              endpointNodeId: widgetId,
-              magnet: 'AUTO'
-            };
-            connector.connectorEnd = {
-              endpointNodeId: newSticky.id,
-              magnet: 'AUTO'
-            };
+    if(pendingApiCall) {
+      console.log("Making API call with:", pendingApiCall);
+
+      try {
+        const response = await fetch('https://vercel-tymothy6.vercel.app/api/openai', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: "You are a helpful assistant." },
+              { role: "user", content: pendingApiCall }
+            ],
+            model: "gpt-3.5-turbo",
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Received API response:', data);
+          handleApiResponse(data);
+
+          // reset the syncedStates when the API call is successful
+          setPendingApiCall(null);
+          setAccumulatedStickyTexts([]);
+          setStickyFill(null);
+        } else {
+          console.error("Error making API call:", await response.text());
         }
-      };
+      } catch (error) {
+        console.error("Error making API call:", (error as Error).message);
+      }
 
-  figma.ui.onmessage = handleApiResponse;
-
-  return() => {
-    figma.ui.onmessage = undefined;
-  };
- })
+    }
+  }
 
   return (
     <AutoLayout 
