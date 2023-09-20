@@ -3,6 +3,12 @@ const { AutoLayout, Text, useEffect, useWidgetNodeId, useSyncedState, waitForTas
 
 // Initialize the iframe used to make API calls outside of the widget code
 figma.showUI(__html__, { width: 70, height: 0 });
+// Listen for console logs from the iframe
+figma.ui.onmessage = (event) => {
+  if (event.pluginMessage && event.pluginMessage.type === 'iframeLog') {
+    console.log('iframe log:', event.message);
+  }
+};
 
 function Copilot() {
   const widgetId = useWidgetNodeId();
@@ -72,16 +78,20 @@ function Copilot() {
     console.log("handleJamClick triggered"); // check that the function is triggered
 
     if(pendingApiCall) {
-      console.log("Posting message:", pendingApiCall); // check the contents of the message
+      console.log("Posting message:", pendingApiCall);
 
-      // Start the async task
-      const apiCallTask = new Promise<void>((resolve, reject) => {
-        const handleApiResponse = (event: any) => {
-          console.log("handleApiResponse triggered with data:", event.data);
+      figma.ui.postMessage({ pluginMessage: { type: 'makeApiCall', text: pendingApiCall } });
+      setPendingApiCall(null); // Reset the pending API call
+    }
+  }
 
-          if (event.type === 'apiResponse') {
-            const completionText = event.data.choices[0].message.content;
-    
+  useEffect(() => {
+    const handleApiResponse = (event: any) => {
+      console.log("Received message:", event);
+      console.log("handleApiResponse triggered with data:", event.pluginMessage);
+
+      if (event.pluginMessage && event.pluginMessage.type === 'apiResponse') {
+        const completionText = event.pluginMessage.data.choices[0].message.content;
             // Create a new sticky note using the widget position as reference
             const newSticky = figma.createSticky();
             newSticky.text.characters = completionText || '';
@@ -103,18 +113,15 @@ function Copilot() {
               endpointNodeId: newSticky.id,
               magnet: 'AUTO'
             };
-            resolve();
-          }
-        };
+        }
+      };
 
-        figma.ui.onmessage = handleApiResponse;
-        figma.ui.postMessage({ type: 'makeApiCall', text: pendingApiCall });
-        waitForTask(apiCallTask);
+  figma.ui.onmessage = handleApiResponse;
 
-        setPendingApiCall(null); // Reset the pending API call
-      });
-    }
-  }
+  return() => {
+    figma.ui.onmessage = undefined;
+  };
+ })
 
   return (
     <AutoLayout 
