@@ -59,7 +59,7 @@ function Copilot() {
           if ('endpointNodeId' in connector.connectorStart) {
             const node = figma.getNodeById(connector.connectorStart.endpointNodeId);
             if (node && node.type === "STICKY") {
-            startNode = node as StickyNode;
+              startNode = node as StickyNode;
             }
           }
 
@@ -124,6 +124,10 @@ function Copilot() {
    
     newSticky.text.characters = content || '';
 
+    if (!widgetId) {
+      console.error("Widget ID not found");
+      return;
+    }
     const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
 
     if (widgetNode) {
@@ -148,12 +152,22 @@ function Copilot() {
       const defaultFont: FontName = { family: "Inter", style: "Medium" };
       await figma.loadFontAsync(defaultFont);
       const newSection = figma.createSection();
+      if (stickyFill !== null) {
+        newSection.fills = stickyFill;
+      }
       newSection.name = selectedFunction || "Ideate"; // provide a default name if one is not provided
+      
+      if (!widgetId) {
+        console.error("Widget ID not found");
+        return;
+      }
 
       const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
 
       newSection.x = widgetNode.x + widgetNode.width + 100;
       newSection.y = widgetNode.y;
+
+      let stickyHeight = 0; // determine this by the height of the first sticky
 
       data.choices.forEach((choice: any, index: number) => {
           const completionText = choice.message.content.trim();
@@ -163,21 +177,29 @@ function Copilot() {
           }
           newSticky.text.fontName = defaultFont;
           newSticky.text.characters = completionText || '';
-
+          if (index === 0) {
+            stickyHeight = newSticky.height;
+          }
           // Place the stickies in a vertical arrangement within the section
           newSticky.x = newSection.x;
-          newSticky.y = newSection.y + (index * (newSticky.height + 10)); // spacing between stickies = 10
-
-          const connector = figma.createConnector();
-          connector.connectorStart = {
-            endpointNodeId: widgetId,
-            magnet: 'AUTO'
-          };
-          connector.connectorEnd = {
-            endpointNodeId: newSection.id,
-            magnet: 'AUTO'
-          };
+          newSticky.y = newSection.y + (index * (newSticky.height + 10)); // spacing between stickies = 10px
       });
+
+      // Resize the section to fit the stickies
+      const totalHeight = data.choices.length * (stickyHeight + 10);
+      newSection.resizeWithoutConstraints(newSection.width, totalHeight);
+
+      // Draw a connector between the widget and the section
+      const connector = figma.createConnector();
+      connector.connectorStart = {
+        endpointNodeId: widgetId,
+        magnet: 'AUTO'
+      };
+      connector.connectorEnd = {
+        endpointNodeId: newSection.id,
+        magnet: 'AUTO'
+      };
+
     } else {
       console.error("Error handling API response:", data);
     }
@@ -192,6 +214,12 @@ function Copilot() {
   async function createCodeBlock(content: string) {
     const languageRegEx = /```(.*?)\n([\s\S]*?)```/g;
     const languageMatch = languageRegEx.exec(content); // languageMatch[0] returns the entire matched string 
+
+    if (!languageMatch) {
+      console.error("Error parsing code block. Please try again with a supported language.");
+      return;
+    }
+
     const defaultFont: FontName = { family: "Source Code Pro", style: "Medium" };
     await figma.loadFontAsync(defaultFont);
 
@@ -208,7 +236,17 @@ function Copilot() {
       } else {
         newCode.codeLanguage = 'PLAINTEXT';
       }
-       const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
+
+      if (!widgetId) {
+        console.error("Widget ID not found");
+        return;
+      }
+      const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
+
+      if (!widgetNode) {
+        console.error("Widget node not found.");
+        return;
+      }
 
       if (widgetNode) {
       newCode.x = widgetNode.x + widgetNode.width + 100;
@@ -257,13 +295,13 @@ function Copilot() {
 
       switch (selectedFunction) {
         case "Ideate":
-          systemPrompt = "You are a helpful assistant. You are brainstorming ideas based on the message provided.";
+          systemPrompt = "You are a helpful assistant. You will provide concise, single-phrase answers. Given the following, provide one related concept:";
           break;
         case "Teach me":
           systemPrompt = "You are a helpful assistant. Explain the contents of the message provided in simple terms.";
           break;
         case "Rabbit hole":
-          systemPrompt = "You are a helpful assistant. You are going down a rabbit hole. Provide an example, idea, statistic, fact, or insight based on the message provided.";
+          systemPrompt = "You are a helpful assistant. You will provide concise, single-phrase answers. You are going down a rabbit hole. Provide an example, idea, statistic, fact, or insight based on the following:";
           break;
         case "Summarize":
           systemPrompt = "You are a helpful assistant. Summarize the messages provided into a concise description.";
@@ -300,7 +338,6 @@ function Copilot() {
           const data = await response.json();
           console.log('Received API response:', data);
           handleApiResponse(data);
-
           // reset the syncedStates when the API call is successful
           setPendingApiCall(null);
           setAccumulatedStickyTexts([]);
@@ -311,7 +348,6 @@ function Copilot() {
       } catch (error) {
         console.error("Error making API call:", (error as Error).message);
       }
-
     }
   }
 
