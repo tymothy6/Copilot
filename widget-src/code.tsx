@@ -1,8 +1,7 @@
 const { widget } = figma
 const { AutoLayout, Text, Input, SVG, useEffect, useWidgetNodeId, useSyncedState, waitForTask } = widget
 
-// Initialize the iframe used to make API calls outside of the widget code
-// figma.showUI(__html__, { width: 70, height: 0 });
+// Initialize the iframe used to make API calls outside of the widget code using figma.showUI(__html__, { width: 70, height: 0 });
 
 function Copilot() {
   const widgetId = useWidgetNodeId();
@@ -15,18 +14,19 @@ function Copilot() {
   const [activeView, setActiveView] = useSyncedState<"initial" | "input" | "jam">("activeViewKey", "initial");
   const [selectedFunction, setSelectedFunction] = useSyncedState<string | null>("selectedFunction", null);
   const [additionalInput, setAdditionalInput] = useSyncedState<string | null>("additionalInput", null); // additional input for functions that need it
-
+  const [stickyIdToIndexMap, setStickyIdToIndexMap] = useSyncedState<Record<string, number>>("stickyIdToIndexMap", {});
+  const processedStickies = new Set(); // keep track of processed stickies
   const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null); 
   const [accumulatedStickyTexts, setAccumulatedStickyTexts] = useSyncedState<string[]>("accumulatedStickyTexts", []);
   const [stickyFill, setStickyFill] = useSyncedState<ReadonlyArray<Paint> | null>("stickyFill", null);
 
   const functionColourMap: Record<string, RGB> = {
-    "Ideate": { r: 182, g: 255, b: 138 },
-    "Teach me": { r: 255, g: 240, b: 187 },
-    "Rabbit hole": { r: 103, g: 182, b: 255 },
-    "Summarize": { r: 255, g: 143, b: 118 },
-    "Rewrite": { r: 187, g: 175, b: 255 },
-    "Code": { r: 78, g: 78, b: 78 },
+    "Ideate": { r: 182/255, g: 255/255, b: 138/255 },
+    "Teach me": { r: 255/255, g: 240/255, b: 187/255 },
+    "Rabbit hole": { r: 103/255, g: 182/255, b: 255/255 },
+    "Summarize": { r: 255/255, g: 143/255, b: 118/255 },
+    "Rewrite": { r: 187/255, g: 175/255, b: 255/255 },
+    "Code": { r: 78/255, g: 78/255, b: 78/255 },
   };
 
   async function selectionHandler (functionName: string) {
@@ -48,6 +48,7 @@ function Copilot() {
     const defaultFont: FontName = { family: "Inter", style: "Medium" };
     await figma.loadFontAsync(defaultFont);
     blankSticky.text.fontName = defaultFont;
+    processedStickies.add(blankSticky.id);
 
     if (!widgetId) {
       console.error("Widget ID not found");
@@ -55,14 +56,12 @@ function Copilot() {
     }
     const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
 
-    if (!widgetNode) {
+    if (widgetNode) {
+      blankSticky.x = widgetNode.x - blankSticky.width - 100;
+      blankSticky.y = widgetNode.y;
+    } else {
       console.error("Widget node not found.");
       return;
-    }
-
-    if (widgetNode) {
-      blankSticky.x = widgetNode.x + widgetNode.width - 100;
-      blankSticky.y = widgetNode.y + (widgetNode.height / 2) - (blankSticky.height / 2);
     }
     // Create a connector between the widget and the blank sticky
     const connector = figma.createConnector();
@@ -122,14 +121,82 @@ function Copilot() {
 
   useEffect(() => {
     let resolvePromise: (() => void) | undefined;
-    const processedStickies = new Set(); // keep track of processed stickies
 
-    // Listen for document changes of the CreateChange type
+    const processSticky = (sticky: StickyNode) => {
+      const newStickyText = sticky.text.characters;
+      let newAccumulatedTexts;
+
+      if (stickyIdToIndexMap[sticky.id] !== undefined) {
+        // update existing sticky text
+        newAccumulatedTexts = [...accumulatedStickyTexts];
+        newAccumulatedTexts[stickyIdToIndexMap[sticky.id]] = newStickyText;
+      } else {
+        // handle new stickies
+        newAccumulatedTexts = [...accumulatedStickyTexts, newStickyText];
+        setStickyIdToIndexMap(prevMap => ({
+          ...prevMap,
+          [sticky.id]: newAccumulatedTexts.length - 1
+        }));
+      }
+
+      setAccumulatedStickyTexts(newAccumulatedTexts);
+      const aggregatedText = newAccumulatedTexts.join('\n');
+      console.log('Aggregated sticky text:', aggregatedText);
+      setPendingApiCall(aggregatedText);
+    };
+
+    // Listen for document changes
     const documentChangeListener = (event: any) => {
       const newStickyTexts: string[] = []; // initialize an array to store the sticky texts
+      if (!widgetId) {
+        console.error("Widget ID not found");
+        return;
+      }
 
       for (const change of event.documentChanges) {
-        // Check for CreateChange type (newly created connectors)
+        // Handle deleted stickies and connectors
+        if (change.type === "DELETE") {
+          let deletedStickyId;
+
+          if (change.node.type === "STICKY") {
+            deletedStickyId = change.node.id;
+          } else if (change.node.type === "CONNECTOR") {
+            const connector = change.node as ConnectorNode;
+
+            if (connector.connectorStart && 'endpointNodeId' in connector.connectorStart) {
+              const startNode = figma.getNodeById(connector.connectorStart.endpointNodeId);
+              if (startNode && startNode.type === "STICKY" && connector.connectorEnd && 'endpointNodeId' in connector.connectorEnd) {
+                const endNode = figma.getNodeById(connector.connectorEnd.endpointNodeId);
+                if (endNode && endNode.id === widgetId) {
+                  deletedStickyId = startNode.id;
+                }
+              }
+            }
+          }
+
+          if (deletedStickyId) { // check that a sticky was deleted or a connector linking the sticky and the widget was deleted
+            processedStickies.delete(deletedStickyId);
+            const deletedStickyIndex = stickyIdToIndexMap[deletedStickyId];
+            if (typeof deletedStickyIndex !== "undefined") {
+              const newAccumulatedTexts = [...accumulatedStickyTexts];
+              newAccumulatedTexts.splice(deletedStickyIndex, 1);
+              setAccumulatedStickyTexts(newAccumulatedTexts);
+              // Create a new map without the deleted sticky, adjusting the indices for all subsequent stickies
+              const newStickyMap = {...stickyIdToIndexMap};
+              for (const [stickyId, index] of Object.entries(newStickyMap)) {
+                if (index > deletedStickyIndex) {
+                  newStickyMap[stickyId] = index - 1;
+                }
+              }
+          
+            delete newStickyMap[deletedStickyId];
+            setStickyIdToIndexMap(newStickyMap);
+            }
+          }
+          continue;
+      }
+
+        // Check for newly created connectors
         if (change.type === "CREATE" && change.node.type === "CONNECTOR") {
           console.log('New connector created:', change.node); // check that the connector is created
 
@@ -158,13 +225,12 @@ function Copilot() {
           if (!startNode || !endNode) continue;
 
           const isStickyConnectedToWidget = startNode && endNode && startNode.type === "STICKY" && endNode.id === widgetId; 
-          // check that the connector is drawn from the sticky to the widget (not the other way around)
 
           if (isStickyConnectedToWidget) {
             // First check if the sticky has been processed before ..
             if (!processedStickies.has(startNode.id)) {
-            newStickyTexts.push(startNode.text.characters); // add the sticky text to the array
-            processedStickies.add(startNode.id); // add the sticky ID to the set
+              processSticky(startNode);
+              processedStickies.add(startNode.id);
 
             if (Array.isArray(startNode.fills)) {
               setStickyFill(startNode.fills); // update the sticky fill
@@ -174,17 +240,18 @@ function Copilot() {
           }
         }
       }
+      // Check for changes to the sticky text
+      else if (change.type === "PROPERTY_CHANGE" && processedStickies.has(change.node.id)) {
+        console.log( 'Sticky text changed:', change.node);
+        const changedProperties = change.properties as NodeChangeProperty[];
+        console.log('Changed properties:', changedProperties);
+        if (changedProperties.includes("characters")) {
+          const sticky = change.node as StickyNode;
+          processSticky(sticky);
+        }
+      }
     }
 
-      if (newStickyTexts.length > 0) {
-        const newAccumulatedTexts = [...accumulatedStickyTexts, ...newStickyTexts];
-        setAccumulatedStickyTexts(newAccumulatedTexts); // update the accumulated sticky texts
-
-        const aggregatedText = newAccumulatedTexts.join('\n');
-        console.log('Aggregated text:', aggregatedText);
-
-        setPendingApiCall(aggregatedText); // update the pending API call
-      }
     };
 
     waitForTask(new Promise<void>(resolve => {
@@ -220,6 +287,9 @@ function Copilot() {
     if (widgetNode) {
       newSticky.x = widgetNode.x + widgetNode.width + 100;
       newSticky.y = widgetNode.y + (widgetNode.height / 2) - (newSticky.height / 2);
+    } else {
+      console.error("Widget node not found.");
+      return;
     }
     // Create a connector between the widget and the new sticky
     const connector = figma.createConnector();
@@ -256,6 +326,11 @@ function Copilot() {
       }
 
       const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
+
+      if (!widgetNode) {
+        console.error("Widget node not found.");
+        return;
+      }
 
       newSection.x = widgetNode.x + widgetNode.width + 100;
       newSection.y = widgetNode.y;
@@ -342,15 +417,14 @@ function Copilot() {
       }
       const widgetNode = figma.getNodeById(widgetId) as WidgetNode;
 
-      if (!widgetNode) {
+      if (widgetNode) {
+      newCode.x = widgetNode.x + widgetNode.width + 100;
+      newCode.y = widgetNode.y + (widgetNode.height / 2) - (newCode.height / 2);
+      } else {
         console.error("Widget node not found.");
         return;
       }
 
-      if (widgetNode) {
-      newCode.x = widgetNode.x + widgetNode.width + 100;
-      newCode.y = widgetNode.y + (widgetNode.height / 2) - (newCode.height / 2);
-      }
       // Create a connector between the widget and the code block
       const connector = figma.createConnector();
       connector.connectorStart = {
