@@ -1,3 +1,8 @@
+# Jam Copilot
+
+Use ChatGPT visually in FigJam using stickies and connectors. Heavily inspired by Google's [Visual Blocks](https://visualblocks.withgoogle.com/#/) and Figma's Jambot.
+
+
 Below are the steps to get your widget running. You can also find instructions at:
 
 https://www.figma.com/widget-docs/setup-guide/
