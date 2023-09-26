@@ -15,7 +15,7 @@ function Copilot() {
   const [selectedFunction, setSelectedFunction] = useSyncedState<string | null>("selectedFunction", null);
   const [additionalInput, setAdditionalInput] = useSyncedState<string | null>("additionalInput", null); // additional input for functions that need it
   const [stickyIdToIndexMap, setStickyIdToIndexMap] = useSyncedState<Record<string, number>>("stickyIdToIndexMap", {});
-  const processedStickies = new Set(); // keep track of processed stickies
+  const [processedStickies, setProcessedStickies] = useSyncedState<string[]>("processedStickies", []);
   const [pendingApiCall, setPendingApiCall] = useSyncedState<string | null>("pendingApiCall", null); 
   const [accumulatedStickyTexts, setAccumulatedStickyTexts] = useSyncedState<string[]>("accumulatedStickyTexts", []);
   const [stickyFill, setStickyFill] = useSyncedState<ReadonlyArray<Paint> | null>("stickyFill", null);
@@ -26,13 +26,21 @@ function Copilot() {
     "Rabbit hole": { r: 103/255, g: 182/255, b: 255/255 },
     "Summarize": { r: 255/255, g: 143/255, b: 118/255 },
     "Rewrite": { r: 187/255, g: 175/255, b: 255/255 },
-    "Code": { r: 78/255, g: 78/255, b: 78/255 },
+    "Code": { r: 220/255, g: 220/255, b: 220/255 },
   };
 
   async function selectionHandler (functionName: string) {
     try {
     // Create a new sticky note using the widget position as reference
     const blankSticky = figma.createSticky();
+    // Add the blank sticky to the processed stickies set
+    console.log("Before updating processed stickies:", processedStickies); // debugging logs
+    setProcessedStickies(prevStickies => {
+      const updatedStickies = new Set(prevStickies);
+      updatedStickies.add(blankSticky.id);
+      return Array.from(updatedStickies);
+    });
+    console.log("After updating processed stickies:", processedStickies); // debugging logs
     const selectionFill = functionColourMap[functionName];
     if (!selectionFill) {
       console.error("No colour defined for: ${functionName}");
@@ -48,7 +56,7 @@ function Copilot() {
     const defaultFont: FontName = { family: "Inter", style: "Medium" };
     await figma.loadFontAsync(defaultFont);
     blankSticky.text.fontName = defaultFont;
-    processedStickies.add(blankSticky.id);
+    
 
     if (!widgetId) {
       console.error("Widget ID not found");
@@ -84,6 +92,8 @@ function Copilot() {
     console.log("Function selected:", functionName)
     setSelectedFunction(functionName);
     selectionHandler(functionName);
+    console.log('Processed stickies:', Array.from(processedStickies));
+
     if (functionName === "Rewrite" || functionName === "Code") { // list functions that need additional input
       setActiveView("input");
     } else {
@@ -143,20 +153,22 @@ function Copilot() {
       const aggregatedText = newAccumulatedTexts.join('\n');
       console.log('Aggregated sticky text:', aggregatedText);
       setPendingApiCall(aggregatedText);
+      console.log('Pending API call:', pendingApiCall);
     };
 
     // Listen for document changes
     const documentChangeListener = (event: any) => {
-      const newStickyTexts: string[] = []; // initialize an array to store the sticky texts
+      
       if (!widgetId) {
         console.error("Widget ID not found");
         return;
       }
 
       for (const change of event.documentChanges) {
+        console.log('Document change:', change);
         // Handle deleted stickies and connectors
         if (change.type === "DELETE") {
-          let deletedStickyId;
+          let deletedStickyId: string | undefined = undefined;
 
           if (change.node.type === "STICKY") {
             deletedStickyId = change.node.id;
@@ -175,7 +187,11 @@ function Copilot() {
           }
 
           if (deletedStickyId) { // check that a sticky was deleted or a connector linking the sticky and the widget was deleted
-            processedStickies.delete(deletedStickyId);
+            setProcessedStickies(prevStickies => {
+              const updatedStickies = new Set(prevStickies);
+              updatedStickies.delete(deletedStickyId as string);
+              return Array.from(updatedStickies);
+            });
             const deletedStickyIndex = stickyIdToIndexMap[deletedStickyId];
             if (typeof deletedStickyIndex !== "undefined") {
               const newAccumulatedTexts = [...accumulatedStickyTexts];
@@ -224,28 +240,45 @@ function Copilot() {
 
           if (!startNode || !endNode) continue;
 
-          const isStickyConnectedToWidget = startNode && endNode && startNode.type === "STICKY" && endNode.id === widgetId; 
+          const isStickyConnectedToWidget = startNode !== undefined && endNode !== undefined && startNode.type === "STICKY" && endNode.id === widgetId;
 
           if (isStickyConnectedToWidget) {
+            const defStartNode = startNode as StickyNode;
             // First check if the sticky has been processed before ..
-            if (!processedStickies.has(startNode.id)) {
-              processSticky(startNode);
-              processedStickies.add(startNode.id);
+            if (!processedStickies.includes(defStartNode.id)) {
+              processSticky(defStartNode);
+              setProcessedStickies(prevStickies => [...prevStickies, defStartNode.id]);
 
-            if (Array.isArray(startNode.fills)) {
-              setStickyFill(startNode.fills); // update the sticky fill
+            if (Array.isArray(defStartNode.fills)) {
+              setStickyFill(defStartNode.fills); // update the sticky fill
             } else {
               setStickyFill(null);
             }
           }
         }
       }
+
+      // debugging logs
+      if (change.type === "PROPERTY_CHANGE") {
+        console.log('Properties that changed for node:', change.properties);
+        console.log('ID of changed node:', change.node.id);
+      }
+      
+      if (processedStickies.includes(change.node.id)) {
+        console.log('Sticky ID is present in processedStickies:', change.node.id);
+      } else {
+        console.log('Sticky ID is NOT present in processedStickies:', change.node.id);
+      }
+      
+
       // Check for changes to the sticky text
-      else if (change.type === "PROPERTY_CHANGE" && processedStickies.has(change.node.id)) {
-        console.log( 'Sticky text changed:', change.node);
+      if (change.type === "PROPERTY_CHANGE" && processedStickies.includes(change.node.id)) {
+        console.log('Properties that changed for node:', change.properties);
+        console.log('ID of changed node:', change.node.id);
+        
         const changedProperties = change.properties as NodeChangeProperty[];
         console.log('Changed properties:', changedProperties);
-        if (changedProperties.includes("characters")) {
+        if (changedProperties.includes("text")) {
           const sticky = change.node as StickyNode;
           processSticky(sticky);
         }
@@ -490,7 +523,7 @@ function Copilot() {
           userMessage = pendingApiCall + (additionalInput || '');
           break;
         case "Code":
-          systemPrompt = "You are a helpful assistant. Provide concise code in the requested language to implement the given task:";
+          systemPrompt = "You are a programming assistant. Provide concise code in the requested language to implement the given task. Be sure to wrap your code in triple backticks with the specified language (```language) to format it as a code block.";
           userMessage = pendingApiCall + (additionalInput || '');
           break;
         default:
