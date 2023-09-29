@@ -1,9 +1,4 @@
-const { widget } = figma
-const { AutoLayout, Text, Input, SVG, useEffect, useWidgetNodeId, useSyncedState, waitForTask } = widget
-
-// Initialize the iframe using figma.showUI(__html__, { width: x, height: y });
-
-function Copilot() {
+export function Copilot() {
   const widgetId = useWidgetNodeId();
   const backArrowSvg = `
   <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -742,4 +737,4 @@ function Copilot() {
   }
 }
 
-widget.register(Copilot)
+
