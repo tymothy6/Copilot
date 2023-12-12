@@ -412,6 +412,7 @@ function Copilot() {
 }
 
   type CodeLanguageValue = 'TYPESCRIPT' | 'CPP' | 'RUBY' | 'CSS' | 'JAVASCRIPT' | 'HTML' | 'JSON' | 'GRAPHQL' | 'PYTHON' | 'GO' | 'SQL' | 'SWIFT' | 'KOTLIN' | 'RUST' | 'BASH' | 'PLAINTEXT' | 'DART';
+  
   function isCodeLanguage(lang: string): lang is CodeLanguageValue {
     const validLanguages: CodeLanguageValue[] = ['TYPESCRIPT', 'CPP', 'RUBY', 'CSS', 'JAVASCRIPT', 'HTML', 'JSON', 'GRAPHQL', 'PYTHON', 'GO', 'SQL', 'SWIFT', 'KOTLIN', 'RUST', 'BASH', 'PLAINTEXT', 'DART'];
     return validLanguages.includes(lang as CodeLanguageValue);

@@ -21,6 +21,7 @@
     "typescript": "*"
   },
   "dependencies": {
+    "@babel/traverse": "^7.23.6",
     "openai": "^4.7.1"
   }
 }
